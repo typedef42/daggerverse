@@ -1,0 +1,12 @@
+{
+  "name": "my-ci",
+  "sdk": "typescript",
+  "dependencies": [
+    {
+      "name": "node",
+      "source": "github.com/TomChv/daggerverse/node@4f06ebb5f74d9325b8be683fd1e0e6ba7f496cbb"
+    }
+  ],
+  "source": "ci",
+  "engineVersion": "v0.13.3"
+}
