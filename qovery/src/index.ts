@@ -40,7 +40,7 @@ class Qovery {
   @func()
   withCli(qoveryToken: string): QoveryCli {
     this.cli = new QoveryCli();
-    this.ctr = this.cli.install(this.ctr, qoveryToken).container();
+    this.ctr = this.cli.install(this.container(), qoveryToken).container();
 
     return this.cli;
   }

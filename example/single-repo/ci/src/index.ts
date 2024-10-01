@@ -1,8 +1,9 @@
-import { dag, Container, Directory, object, func } from "@dagger.io/dagger"
+import { dag, Container, Directory, object, func, File, Platform } from "@dagger.io/dagger"
 
 @object()
 class MyCi {
   private ctr: Container;
+  private currentTag?: string;
 
   private assertContainer(): void {
     if (!this.container) {
@@ -17,9 +18,12 @@ class MyCi {
     return this.ctr;
   }
 
+  /**
+   * Prepare a working container to build code and run tests
+   */
   @func()
-  install(source: Directory): MyCi {
-    this.ctr = dag
+  async install(source: Directory): Promise<MyCi> {
+    this.ctr = await dag
       .node()
       .withVersion("22.9.0")
       .withYarn()
@@ -31,6 +35,8 @@ class MyCi {
       .withExec(["yarn", "install"])
       .withExec(["apt-get", "update"])
       .withExec(["apt-get", "install", "-y", "bash", "curl", "tar", "sudo"]);
+
+    await this.ctr.stdout();
     return this;
   }
   
@@ -38,55 +44,92 @@ class MyCi {
    * Build the source code
    */
   @func()
-  build(): MyCi {
-    this.container().withExec(["yarn", "build"]);
+  async build(): Promise<MyCi> {
+    await this.container().withExec(["yarn", "build"]).stdout();
     return this;
   }
 
    /**
-   * Returns 
+   * Running tests  
    */
    @func()
-   test(): MyCi {
-     this.container().withExec(["yarn", "test"]);
+   async test(): Promise<MyCi> {
+     await this.container().withExec(["yarn", "test"]).stdout();
      return this;
    }
 
-   /**
-   * Returns 
+   async awsPublish(source: Directory, awsAccountId: string, awsCredentials: File, awsContainerRepository: string) {
+    const platform: Platform = "linux/amd64" as Platform;
+
+    const appContainer = dag.container({platform})
+      .build(source);
+
+    return await dag.aws().ecrPush(
+      awsCredentials,
+      "eu-west-3", 
+      awsAccountId , 
+      awsContainerRepository, 
+      appContainer
+    );
+  }
+
+  /**
+   * Build app docker image using target architecture and pushing to AWS ECR
    */
    @func()
-   publish(qoveryToken: string): MyCi {
-    dag.qovery().withContainer(this.container()).withCli(qoveryToken).version();
+   async publish(source: Directory, awsAccountId: string, awsCredentials: File, awsContainerRepository: string): Promise<MyCi> {
+    const tag = Array.from({ length: 7 }, () => {
+      const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+      return chars.charAt(Math.floor(Math.random() * chars.length));
+    }).join('');
+
+    await this.awsPublish(source, awsAccountId, awsCredentials, `${awsContainerRepository}:${tag}`);
+    this.currentTag = tag;
     return this;
    }
 
    /**
-   * Returns 
+   * Deploy an environment on Qovery (by cloning an existing environment and updating the targetted container)
    */
    @func()
    async deploy(qoveryToken: string): Promise<MyCi> {
-    //qovery environment clone --cluster="staging (aws)" --environment=blueprint --environment-type=development --new-environment-name=blueprint-clone --organization=pharaday --project=staging
-    //qovery container update --container="api-harbor" --organization=pharaday --project=staging --environment="prewview-yann" --tag="0.1.2-c9dd252e"
-    //qovery container list --environment=prewview-yann
-    //qovery environment statuses --environment="prewview-yann"
+    if (!this.currentTag) {
+      console.log("No Current tag defined, nothing to deploy");
+      return this;
+    }
 
-    const qoveryCli = dag.qovery().withContainer(this.container()).withCli(qoveryToken).withOrganization("pharaday");
-
-    await qoveryCli.withProject("staging").environment().list();
-    await qoveryCli.withProject("staging").withEnvironment("blueprint").withCluster("staging (aws)").environment().clone("blueprint-clone", "DEVELOPMENT");
-
+    // qovery image on default container
+    const previewEnvironmentName = `prewview-${this.currentTag}`;
+    const qoveryCli = dag.qovery().withCli(qoveryToken).withOrganization("pharaday").withProject("development");
+    
+    await qoveryCli.withEnvironment("test-blueprint").withCluster("staging (aws)").environment().clone(previewEnvironmentName, "DEVELOPMENT");
+    await qoveryCli.withEnvironment(previewEnvironmentName).container().update("backend", { tag: this.currentTag });
+    await qoveryCli.withEnvironment(previewEnvironmentName).environment().deploy({skipPausedServices: true, watch: true});
+    await qoveryCli.withEnvironment(previewEnvironmentName).environment().statuses();
+    
     return this;
-    //TODO: deploy the container
   }
 
    /**
-   * Returns 
+   * Execute global ci pipeline (install, build, test, publish, deploy)
    */
    @func()
-   async pipeline(source: Directory, qoveryToken: string): Promise<void> {
-    await this.install(source).deploy(qoveryToken);
+   async pipeline(source: Directory, qoveryToken: string, awsAccountId: string, awsCredentials: File, awsContainerRepository: string): Promise<string> {
+    let ci = await this.install(source);
+    console.log("🟢🟢🟢 install done! 🟢🟢🟢");  
 
-    // return (await this.install(source).build().test().publish(qoveryToken).deploy(qoveryToken)).container().stdout();
+    ci = await ci.build();
+    console.log("🟢🟢🟢 build done! 🟢🟢🟢");
+
+    ci = await ci.test();
+    console.log("🟢🟢🟢 test done! 🟢🟢🟢");
+
+    ci = await ci.publish(source, awsAccountId, awsCredentials, awsContainerRepository);
+    console.log("🟢🟢🟢 publish done! 🟢🟢🟢");
+
+    ci = await ci.deploy(qoveryToken);
+    console.log("🟢🟢🟢 deploy done! 🟢🟢🟢");
+
+    return "🚀🚀🚀 CI pipeline done! 🚀🚀🚀";
    }
 }

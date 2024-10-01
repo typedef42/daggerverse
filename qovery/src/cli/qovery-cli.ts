@@ -1,5 +1,6 @@
-import { dag, Container, object, func } from "@dagger.io/dagger";
-import { QoveryCliEnvironment } from "./cli-environment";
+import { Container, object, func } from "@dagger.io/dagger";
+import { QoveryCliEnvironment } from "./environment";
+import { QoveryCliContainer } from "./container";
 
 @object()
 export class QoveryCli {
@@ -9,6 +10,7 @@ export class QoveryCli {
   private environmentName?: string;
   private clusterName?: string;
   private environmentModule: QoveryCliEnvironment;
+  private containerModule: QoveryCliContainer;
 
   private assertContainer(): void {
     if (!this.container) {
@@ -19,7 +21,7 @@ export class QoveryCli {
   }
 
   @func()
-  container(): Container {
+  dockerContainer(): Container {
     this.assertContainer();
     return this.ctr;
   }
@@ -60,7 +62,6 @@ export class QoveryCli {
         "-c",
         "curl -s https://get.qovery.com > install.sh && chmod +x install.sh && bash install.sh",
       ]);
-    // .withExec(["qovery", "auth", "--headless"]);
 
     return this;
   }
@@ -70,14 +71,17 @@ export class QoveryCli {
    */
   @func()
   version(): Promise<string> {
-    return this.container().withExec(["qovery", "version"]).stdout();
+    return this.dockerContainer().withExec(["qovery", "version"]).stdout();
   }
 
+   /**
+   * Returns the Qovery environment module
+   */
   @func()
   environment(): QoveryCliEnvironment {
     if (!this.environmentModule) {
       this.environmentModule = new QoveryCliEnvironment();
-      this.environmentModule.setContainer(this.container());
+      this.environmentModule.setContainer(this.dockerContainer());
     }
 
     this.environmentModule.setContext(
@@ -87,5 +91,24 @@ export class QoveryCli {
       this.clusterName
     );
     return this.environmentModule;
+  }
+
+  /**
+   * Returns the Qovery container module
+   */
+  @func()
+  container(): QoveryCliContainer {
+    if (!this.containerModule) {
+      this.containerModule = new QoveryCliContainer();
+      this.containerModule.setContainer(this.dockerContainer());
+    }
+
+    this.containerModule.setContext(
+      this.organizationName,
+      this.projectName,
+      this.environmentName,
+      this.clusterName
+    );
+    return this.containerModule;
   }
 }

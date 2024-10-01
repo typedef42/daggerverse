@@ -17,3 +17,5 @@
 **/sdk/
 **/node_modules/
 **/.pnpm-store/
+
+**/.aws/
