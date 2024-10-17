@@ -64,6 +64,10 @@ class MyCi {
     const appContainer = dag.container({platform})
       .build(source);
 
+    await dag.aws().awsCli(awsCredentials).withExec(["aws", "--version"]).stdout();
+
+    await dag.aws().ecrPushExample(awsCredentials, "eu-west-3", awsAccountId, "test:qovery");
+
     return await dag.aws().ecrPush(
       awsCredentials,
       "eu-west-3", 
